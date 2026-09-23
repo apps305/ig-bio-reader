@@ -1,0 +1,25 @@
+name: ig-bio-reader
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - "gh-bio-reader.py"
+      - ".github/workflows/ig-bio-reader.yml"
+
+jobs:
+  read-bios:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      BIO_REPORT_KEY: br-4f2a9c71e8d34b6a9f0e2d7c5b8a1346
+      PORTAL_URL: https://clipping.onyxpointmanagement.net
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Read pending bios from runner egress
+        run: python gh-bio-reader.py
