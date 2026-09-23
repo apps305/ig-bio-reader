@@ -41,7 +41,36 @@ def parse_profile(html):
     m = re.search(r'"follower_count":\s*(\d+)', html)
     if m:
         out["follower_count"] = int(m.group(1))
+    # PROVEN 2026-09-23: crawler/preview-bot identities get the full page and
+    # the bio sits in the plain description meta tag. Zero cookies.
+    if not out.get("bio"):
+        m = re.search(r'<meta\s+content="([^"]*)"\s+name="description"', html) or re.search(
+            r'<meta\s+name="description"\s+content="([^"]*)"', html
+        )
+        if m:
+            import html as hmod
+
+            out["bio"] = hmod.unescape(m.group(1))
+    if not out.get("owner_username"):
+        m = re.search(r'og:title"\s+content="([^"]*)"', html)
+        if m:
+            import html as hmod
+
+            t = hmod.unescape(m.group(1))
+            mm = re.search(r"\(@([A-Za-z0-9._]+)\)", t)
+            if mm:
+                out["owner_username"] = mm.group(1)
     return out
+
+
+BOT_UAS = [
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "Mozilla/5.0 (compatible; Bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+    "TelegramBot/7.0 (like TwitterBot)",
+    "WhatsApp/2.24.10.70 W",
+    "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
+    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+]
 
 
 def report(payload):
@@ -69,14 +98,24 @@ def main():
     for job in jobs:
         handle = job["handle"]
         row = {"handle": handle, "source": "gh-actions-runner"}
-        try:
-            html = get(f"https://www.instagram.com/{handle}/")
-            row.update(parse_profile(html))
-            row["len"] = len(html)
-        except Exception as e:
-            row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
+        for ua in BOT_UAS + [UA]:
+            try:
+                html = get(
+                    f"https://www.instagram.com/{handle}/",
+                    headers=dict(HEADERS, **{"User-Agent": ua}),
+                )
+                parsed = parse_profile(html)
+                row.update(parsed)
+                row["len"] = len(html)
+                row["ua"] = ua[:30]
+                # the login-wall page has a welcome-text description meta but
+                # no numeric id; only a page with the id is a real profile
+                if row.get("owner_id"):
+                    break
+            except Exception as e:
+                row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
         print(json.dumps(row)[:400])
-        if row.get("bio") or row.get("owner_id"):
+        if row.get("owner_id"):
             report(row)
     return 0
 
