@@ -112,16 +112,43 @@ def free_proxies():
                     socks.append(line)
         except Exception:
             continue
+    # the sources the owner's own working scraper uses (proven in production)
+    try:
+        r = urllib.request.urlopen(
+            "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/http/data.json",
+            timeout=15,
+        )
+        for it in json.loads(r.read().decode(errors="replace")):
+            if it.get("ip") and it.get("port"):
+                http.append(f"{it['ip']}:{it['port']}")
+    except Exception:
+        pass
+    try:
+        r = urllib.request.urlopen(
+            "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies.json", timeout=20
+        )
+        arr = json.loads(r.read().decode(errors="replace"))
+        arr.sort(key=lambda x: x.get("last_checked") or "", reverse=True)
+        for it in arr[:60]:
+            proto = it.get("protocol")
+            addr = f"{it.get('ip')}:{it.get('port')}"
+            if proto == "http":
+                http.append(addr)
+            elif proto in ("socks4", "socks5"):
+                socks.append((proto, addr))
+    except Exception:
+        pass
     seen = set()
     pool = []
     for addr in http[:40]:
         if addr not in seen:
             seen.add(addr)
             pool.append({"server": "http://" + addr, "kind": "http"})
-    for addr in socks[:40]:
+    for entry in socks[:40]:
+        proto, addr = entry if isinstance(entry, tuple) else ("socks5", entry)
         if addr not in seen:
             seen.add(addr)
-            pool.append({"server": "socks5://" + addr, "kind": "socks5"})
+            pool.append({"server": f"{proto}://" + addr, "kind": proto})
     return pool
 
 
@@ -214,7 +241,7 @@ def live_proxies(handle, pool):
                     outs.append(px)
             except Exception:
                 continue
-        elif have_requests:
+        elif have_requests and px["kind"].startswith("socks"):
             try:
                 r = requests.get(
                     f"https://www.instagram.com/{handle}/",
@@ -311,7 +338,7 @@ def render_bio(handle, pool):
     # urllib gets refused), then health-checked home-IP proxies only
     import subprocess
 
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "playwright"], check=False)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "playwright", "pysocks"], check=False)
     subprocess.run(["playwright", "install", "chromium"], check=False)
     try:
         got = render_once(handle, None)
