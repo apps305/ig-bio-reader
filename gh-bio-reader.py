@@ -303,7 +303,25 @@ def render_once(handle, proxy=None):
                     caps.append(t)
             except Exception:
                 pass
+        rendered = ""
+        try:
+            rendered = page.inner_text("body")
+        except Exception:
+            pass
+        content = ""
+        try:
+            content = page.content()
+        except Exception:
+            pass
         br.close()
+    mid = re.search(r"profilePage_(\d+)", content or "")
+    if rendered and len(rendered) > 40 and mid:
+        return {
+            "bio": rendered,
+            "owner_id": mid.group(1),
+            "owner_username": handle,
+            "len": 999999,
+        }
     for t in caps:
         m = re.search(r'"biography"\s*:\s*"((?:[^"\\]|\\.)*)"', t)
         if not m:
