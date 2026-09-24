@@ -75,25 +75,34 @@ BOT_UAS = [
 
 def free_proxies():
     outs = []
-    try:
-        r = urllib.request.urlopen(
-            "https://proxylist.geonode.com/api/proxy-list?limit=30&sort_by=lastChecked", timeout=15
-        )
-        for it in json.loads(r.read().decode(errors="replace"))[:30]:
-            if "http" in (it.get("protocols") or []):
-                outs.append(str(it["ip"]) + ":" + str(it["port"]))
-    except Exception:
-        pass
-    if not outs:
+    sources = [
+        "https://proxylist.geonode.com/api/proxy-list?limit=50&sort_by=lastChecked",
+        "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all",
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    ]
+    for src in sources:
         try:
-            t = urllib.request.urlopen(
-                "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all",
-                timeout=15,
-            ).read().decode(errors="replace")
-            outs = [l.strip() for l in t.splitlines() if l.strip()][:30]
+            if "geonode" in src:
+                r = urllib.request.urlopen(src, timeout=15)
+                for it in json.loads(r.read().decode(errors="replace"))[:50]:
+                    if "http" in (it.get("protocols") or []):
+                        outs.append(str(it["ip"]) + ":" + str(it["port"]))
+            else:
+                t = urllib.request.urlopen(src, timeout=15).read().decode(errors="replace")
+                for line in t.splitlines():
+                    line = line.strip()
+                    if line and ":" in line and not line.startswith("#"):
+                        outs.append(line)
         except Exception:
-            pass
-    return outs[:12]
+            continue
+    seen = set()
+    dedup = []
+    for px in outs:
+        if px not in seen:
+            seen.add(px)
+            dedup.append(px)
+    return dedup[:40]
 
 
 def read_via_proxies(handle):
@@ -191,14 +200,19 @@ def render_once(handle, proxy=None):
     caps = []
     with sync_playwright() as pw:
         if proxy:
-            br = pw.chromium.launch(headless=True, proxy={"server": "http://" + proxy})
+            br = pw.chromium.launch(
+                headless=True,
+                proxy={"server": "http://" + proxy},
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            )
         else:
-            br = pw.chromium.launch(headless=True)
+            br = pw.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
         ctx = br.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800},
         )
+        ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
         page = ctx.new_page()
         resps = []
         page.on("response", lambda r: resps.append(r))
