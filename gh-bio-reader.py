@@ -332,10 +332,10 @@ def read_jina(handle):
         return None
 
 
-def render_bio(handle, pool):
+def render_bio(handle, live):
     # real chromium capturing the biography from the page's own client-side
     # responses: direct first (a real browser fingerprint can pass where raw
-    # urllib gets refused), then health-checked home-IP proxies only
+    # urllib gets refused), then the already health-checked exits only
     import subprocess
 
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "playwright", "pysocks"], check=False)
@@ -348,7 +348,7 @@ def render_bio(handle, pool):
             return got
     except Exception as e:
         print("render direct failed", type(e).__name__)
-    for px in live_proxies(handle, pool):
+    for px in live:
         try:
             got = render_once(handle, px["server"])
             if got:
@@ -408,21 +408,26 @@ def main():
                         break
                 except Exception as e:
                     row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
+        # burn discipline (owner's proven tool): health-check exits FIRST, then
+        # spend exactly one expensive call per live exit, api before page
+        live = live_proxies(handle, pool) if not got else []
         if not got:
-            for px in [p["server"][7:] for p in pool if p["kind"] == "http"][:12]:
+            for px in live:
+                if px["kind"] != "http":
+                    continue
                 try:
-                    got = read_api(handle, px)
+                    got = read_api(handle, px["server"][7:])
                     got["source"] = "gh-api-proxy"
-                    got["proxy"] = px
+                    got["proxy"] = px["server"]
                     break
                 except Exception:
                     continue
         if not got:
-            got = read_via_proxies(handle, pool)
+            got = read_via_proxies(handle, live)
         if not got:
             got = read_jina(handle)
         if not got:
-            got = render_bio(handle, pool)
+            got = render_bio(handle, live)
         if got:
             row.update(got)
         print(json.dumps(row)[:400])
