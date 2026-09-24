@@ -2,7 +2,7 @@ name: ig-bio-reader
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "7 * * * *"
   workflow_dispatch:
   push:
     paths:

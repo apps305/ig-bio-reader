@@ -251,6 +251,23 @@ def render_once(handle, proxy=None):
     return None
 
 
+def read_jina(handle):
+    # r.jina.ai renders the page in its own browser on its own egress and
+    # returns markdown; the bio text is in there when the render succeeds
+    try:
+        req = urllib.request.Request(
+            f"https://r.jina.ai/https://www.instagram.com/{handle}/",
+            headers={"Accept": "text/plain", "User-Agent": UA},
+        )
+        text = urllib.request.urlopen(req, timeout=30).read().decode(errors="replace")
+        if not text or "AbuseAlleviationError" in text or "blocked until" in text or len(text) < 200:
+            return None
+        return {"bio": text, "owner_id": "", "owner_username": handle, "len": 999998, "source": "gh-jina", "ua": "jina-reader"}
+    except Exception as e:
+        print("jina failed", type(e).__name__)
+        return None
+
+
 def render_bio(handle):
     # real chromium capturing the biography from the page's own client-side
     # responses: direct first (a real browser fingerprint can pass where raw
@@ -337,6 +354,8 @@ def main():
                     continue
         if not got:
             got = read_via_proxies(handle)
+        if not got:
+            got = read_jina(handle)
         if not got:
             got = render_bio(handle)
         if got:
