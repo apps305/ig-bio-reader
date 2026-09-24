@@ -74,47 +74,65 @@ BOT_UAS = [
 
 
 def free_proxies():
-    outs = []
-    sources = [
+    # mixed pool: http entries plus socks5 entries, whose pools carry far more
+    # residential exits; playwright speaks socks5 natively
+    http, socks = [], []
+    http_srcs = [
         "https://proxylist.geonode.com/api/proxy-list?limit=50&sort_by=lastChecked",
         "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all",
         "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
         "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
     ]
-    for src in sources:
+    sock_srcs = [
+        "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=10000&country=all",
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+    ]
+    for src in http_srcs:
         try:
             if "geonode" in src:
                 r = urllib.request.urlopen(src, timeout=15)
                 for it in json.loads(r.read().decode(errors="replace"))[:50]:
                     if "http" in (it.get("protocols") or []):
-                        outs.append(str(it["ip"]) + ":" + str(it["port"]))
+                        http.append(str(it["ip"]) + ":" + str(it["port"]))
             else:
                 t = urllib.request.urlopen(src, timeout=15).read().decode(errors="replace")
                 for line in t.splitlines():
                     line = line.strip()
                     if line and ":" in line and not line.startswith("#"):
-                        outs.append(line)
+                        http.append(line)
+        except Exception:
+            continue
+    for src in sock_srcs:
+        try:
+            t = urllib.request.urlopen(src, timeout=15).read().decode(errors="replace")
+            for line in t.splitlines():
+                line = line.strip()
+                if line and ":" in line and not line.startswith("#"):
+                    socks.append(line)
         except Exception:
             continue
     seen = set()
-    dedup = []
-    for px in outs:
-        if px not in seen:
-            seen.add(px)
-            dedup.append(px)
-    return dedup[:24]
+    pool = []
+    for addr in http[:40]:
+        if addr not in seen:
+            seen.add(addr)
+            pool.append({"server": "http://" + addr, "kind": "http"})
+    for addr in socks[:40]:
+        if addr not in seen:
+            seen.add(addr)
+            pool.append({"server": "socks5://" + addr, "kind": "socks5"})
+    return pool
 
 
-def read_via_proxies(handle):
+def read_via_proxies(handle, pool):
     # Instagram blocks cloud egress for crawler identities (proven 2026-09-24);
     # through a home-IP proxy the target sees a residential IP instead
-    import html as hmod
-
-    for px in free_proxies():
+    for px in [p for p in pool if p["kind"] == "http"]:
         for ua in BOT_UAS[:3]:
             try:
                 op = urllib.request.build_opener(
-                    urllib.request.ProxyHandler({"http": "http://" + px, "https": "http://" + px})
+                    urllib.request.ProxyHandler({"http": px["server"], "https": px["server"]})
                 )
                 req = urllib.request.Request(
                     f"https://www.instagram.com/{handle}/",
@@ -131,7 +149,7 @@ def read_via_proxies(handle):
             row["len"] = len(page)
             if row.get("owner_id") and is_full(row):
                 row["ua"] = ua[:30]
-                row["proxy"] = px
+                row["proxy"] = px["server"]
                 return row
     return None
 
@@ -168,28 +186,47 @@ def is_full(row):
     # a page read only counts when the bio section actually carries text, or
     # when it came from the api (len marker 999999). degraded variants carry
     # the id but strip the bio (proven 2026-09-24)
-    if row.get("len", 0) >= 999999:
+    if row.get("len", 0) >= 999998:
         return True
     return bool(re.search(r'on Instagram: "[^"]+"', row.get("bio") or ""))
 
 
-def live_proxies(handle):
+def live_proxies(handle, pool):
     outs = []
-    for px in free_proxies():
-        try:
-            op = urllib.request.build_opener(
-                urllib.request.ProxyHandler({"http": "http://" + px, "https": "http://" + px})
-            )
-            req = urllib.request.Request(
-                f"https://www.instagram.com/{handle}/",
-                headers={"User-Agent": BOT_UAS[0], "Accept": "text/html"},
-            )
-            page = op.open(req, timeout=6).read().decode(errors="replace")
-            if "profilePage_" in page:
-                outs.append(px)
-        except Exception:
-            continue
-        if len(outs) >= 6:
+    try:
+        import requests
+
+        have_requests = True
+    except Exception:
+        have_requests = False
+    for px in pool:
+        if px["kind"] == "http":
+            try:
+                op = urllib.request.build_opener(
+                    urllib.request.ProxyHandler({"http": px["server"], "https": px["server"]})
+                )
+                req = urllib.request.Request(
+                    f"https://www.instagram.com/{handle}/",
+                    headers={"User-Agent": BOT_UAS[0], "Accept": "text/html"},
+                )
+                page = op.open(req, timeout=6).read().decode(errors="replace")
+                if "profilePage_" in page:
+                    outs.append(px)
+            except Exception:
+                continue
+        elif have_requests:
+            try:
+                r = requests.get(
+                    f"https://www.instagram.com/{handle}/",
+                    proxies={"http": px["server"], "https": px["server"]},
+                    headers={"User-Agent": BOT_UAS[0], "Accept": "text/html"},
+                    timeout=6,
+                )
+                if "profilePage_" in r.text:
+                    outs.append(px)
+            except Exception:
+                continue
+        if len(outs) >= 8:
             break
     return outs
 
@@ -202,7 +239,7 @@ def render_once(handle, proxy=None):
         if proxy:
             br = pw.chromium.launch(
                 headless=True,
-                proxy={"server": "http://" + proxy},
+                proxy={"server": proxy},
                 args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
             )
         else:
@@ -268,7 +305,7 @@ def read_jina(handle):
         return None
 
 
-def render_bio(handle):
+def render_bio(handle, pool):
     # real chromium capturing the biography from the page's own client-side
     # responses: direct first (a real browser fingerprint can pass where raw
     # urllib gets refused), then health-checked home-IP proxies only
@@ -284,15 +321,15 @@ def render_bio(handle):
             return got
     except Exception as e:
         print("render direct failed", type(e).__name__)
-    for px in live_proxies(handle):
+    for px in live_proxies(handle, pool):
         try:
-            got = render_once(handle, px)
+            got = render_once(handle, px["server"])
             if got:
                 got["source"] = "gh-render-proxy"
-                print("render proxy ok", px)
+                print("render proxy ok", px["server"])
                 return got
         except Exception as e:
-            print("render proxy failed", px, type(e).__name__)
+            print("render proxy failed", px["server"], type(e).__name__)
     return None
 
 
@@ -321,6 +358,7 @@ def main():
     for job in jobs:
         handle = job["handle"]
         row = {"handle": handle, "source": "gh-actions-runner"}
+        pool = free_proxies()
         got = None
         try:
             got = read_api(handle)
@@ -344,7 +382,7 @@ def main():
                 except Exception as e:
                     row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
         if not got:
-            for px in free_proxies():
+            for px in [p["server"][7:] for p in pool if p["kind"] == "http"][:12]:
                 try:
                     got = read_api(handle, px)
                     got["source"] = "gh-api-proxy"
@@ -353,15 +391,17 @@ def main():
                 except Exception:
                     continue
         if not got:
-            got = read_via_proxies(handle)
+            got = read_via_proxies(handle, pool)
         if not got:
             got = read_jina(handle)
         if not got:
-            got = render_bio(handle)
+            got = render_bio(handle, pool)
         if got:
             row.update(got)
         print(json.dumps(row)[:400])
         if row.get("owner_id") and is_full(row):
+            report(row)
+        elif row.get("bio") and is_full(row):
             report(row)
     return 0
 
