@@ -164,61 +164,102 @@ def is_full(row):
     return bool(re.search(r'on Instagram: "[^"]+"', row.get("bio") or ""))
 
 
+def live_proxies(handle):
+    outs = []
+    for px in free_proxies():
+        try:
+            op = urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": "http://" + px, "https": "http://" + px})
+            )
+            req = urllib.request.Request(
+                f"https://www.instagram.com/{handle}/",
+                headers={"User-Agent": BOT_UAS[0], "Accept": "text/html"},
+            )
+            page = op.open(req, timeout=8).read().decode(errors="replace")
+            if "profilePage_" in page:
+                outs.append(px)
+        except Exception:
+            continue
+        if len(outs) >= 6:
+            break
+    return outs
+
+
+def render_once(handle, proxy=None):
+    from playwright.sync_api import sync_playwright
+
+    caps = []
+    with sync_playwright() as pw:
+        if proxy:
+            br = pw.chromium.launch(headless=True, proxy={"server": "http://" + proxy})
+        else:
+            br = pw.chromium.launch(headless=True)
+        ctx = br.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+        )
+        page = ctx.new_page()
+        resps = []
+        page.on("response", lambda r: resps.append(r))
+        page.goto(f"https://www.instagram.com/{handle}/", timeout=25000, wait_until="domcontentloaded")
+        page.wait_for_timeout(7000)
+        for r in resps:
+            try:
+                if "biography" in r.url or "web_profile_info" in r.url or "graphql" in r.url:
+                    t = r.text()
+                    if '"biography"' in t:
+                        caps.append(t)
+            except Exception:
+                pass
+        if not caps:
+            try:
+                t = page.content()
+                if '"biography"' in t:
+                    caps.append(t)
+            except Exception:
+                pass
+        br.close()
+    for t in caps:
+        m = re.search(r'"biography"\s*:\s*"((?:[^"\\]|\\.)*)"', t)
+        if not m:
+            continue
+        import html as hmod
+
+        mid = re.search(r'"pk"\s*:\s*"(\d+)"', t) or re.search(r'"profilePage_(\d+)"', t)
+        return {
+            "bio": m.group(1).encode().decode("unicode_escape", errors="replace"),
+            "owner_id": mid.group(1) if mid else "",
+            "owner_username": handle,
+            "len": 999999,
+            "proxy": proxy or "direct",
+        }
+    return None
+
+
 def render_bio(handle):
-    # last resort with visible logs: real chromium through a home-IP proxy,
-    # capturing the biography from the page's own responses (what a phone sees)
+    # real chromium capturing the biography from the page's own client-side
+    # responses: direct first (a real browser fingerprint can pass where raw
+    # urllib gets refused), then health-checked home-IP proxies only
     import subprocess
 
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "playwright"], check=False)
     subprocess.run(["playwright", "install", "chromium"], check=False)
-    from playwright.sync_api import sync_playwright
-
-    for px in free_proxies():
+    try:
+        got = render_once(handle, None)
+        if got:
+            got["source"] = "gh-render-direct"
+            print("render direct ok")
+            return got
+    except Exception as e:
+        print("render direct failed", type(e).__name__)
+    for px in live_proxies(handle):
         try:
-            with sync_playwright() as pw:
-                br = pw.chromium.launch(headless=True, proxy={"server": "http://" + px})
-                ctx = br.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-                    viewport={"width": 1280, "height": 800},
-                )
-                page = ctx.new_page()
-                resps = []
-                page.on("response", lambda r: resps.append(r))
-                page.goto(f"https://www.instagram.com/{handle}/", timeout=25000, wait_until="domcontentloaded")
-                page.wait_for_timeout(6000)
-                caps = []
-                for r in resps:
-                    try:
-                        if "biography" in r.url or "web_profile_info" in r.url or "graphql" in r.url:
-                            t = r.text()
-                            if '"biography"' in t:
-                                caps.append(t)
-                    except Exception:
-                        pass
-                if not caps:
-                    try:
-                        t = page.content()
-                        if '"biography"' in t:
-                            caps.append(t)
-                    except Exception:
-                        pass
-                br.close()
-            for t in caps:
-                m = re.search(r'"biography"\s*:\s*"((?:[^"\\]|\\.)*)"', t)
-                if not m:
-                    continue
-                import html as hmod
-
-                mid = re.search(r'"pk"\s*:\s*"(\d+)"', t) or re.search(r'"profilePage_(\d+)"', t)
-                return {
-                    "bio": m.group(1).encode().decode("unicode_escape", errors="replace"),
-                    "owner_id": mid.group(1) if mid else "",
-                    "owner_username": handle,
-                    "len": 999999,
-                    "source": "gh-render-proxy",
-                    "proxy": px,
-                }
+            got = render_once(handle, px)
+            if got:
+                got["source"] = "gh-render-proxy"
+                print("render proxy ok", px)
+                return got
         except Exception as e:
             print("render proxy failed", px, type(e).__name__)
     return None
