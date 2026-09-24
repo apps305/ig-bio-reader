@@ -119,11 +119,22 @@ def read_via_proxies(handle):
             except Exception:
                 continue
             row = parse_profile(page)
-            if row.get("owner_id"):
+            row["len"] = len(page)
+            if row.get("owner_id") and is_full(row):
                 row["ua"] = ua[:30]
                 row["proxy"] = px
                 return row
     return None
+
+
+def is_full(row):
+    # Instagram serves cloud IPs a degraded page variant that carries the
+    # account id but strips the bio section (proven 2026-09-24, graycie.png:
+    # 639KB id-page vs 940KB full page). Only full pages are real reads;
+    # anything else is a wall and must be retried, never reported as a bio.
+    if row.get("len", 0) >= 800000:
+        return True
+    return bool(re.search(r'on Instagram: "[^"]+"', row.get("bio") or ""))
 
 
 def report(payload):
@@ -163,16 +174,16 @@ def main():
                 row["ua"] = ua[:30]
                 # the login-wall page has a welcome-text description meta but
                 # no numeric id; only a page with the id is a real profile
-                if row.get("owner_id"):
+                if row.get("owner_id") and is_full(row):
                     break
             except Exception as e:
                 row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
-        if not row.get("owner_id"):
+        if not (row.get("owner_id") and is_full(row)):
             proxied = read_via_proxies(handle)
             if proxied:
                 row.update(proxied)
         print(json.dumps(row)[:400])
-        if row.get("owner_id"):
+        if row.get("owner_id") and is_full(row):
             report(row)
     return 0
 
