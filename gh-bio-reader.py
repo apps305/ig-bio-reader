@@ -92,12 +92,12 @@ def free_proxies():
         try:
             if "geonode" in src:
                 r = urllib.request.urlopen(src, timeout=15)
-                for it in json.loads(r.read().decode(errors="replace"))[:50]:
+                for it in json.loads(r.read().decode(errors="replace"))[:100]:
                     if "http" in (it.get("protocols") or []):
                         http.append(str(it["ip"]) + ":" + str(it["port"]))
             else:
-                t = urllib.request.urlopen(src, timeout=15).read().decode(errors="replace")
-                for line in t.splitlines():
+                t = urllib.request.urlopen(src, timeout=20).read().decode(errors="replace")
+                for line in t.splitlines()[:400]:
                     line = line.strip()
                     if line and ":" in line and not line.startswith("#"):
                         http.append(line)
@@ -105,8 +105,8 @@ def free_proxies():
             continue
     for src in sock_srcs:
         try:
-            t = urllib.request.urlopen(src, timeout=15).read().decode(errors="replace")
-            for line in t.splitlines():
+            t = urllib.request.urlopen(src, timeout=20).read().decode(errors="replace")
+            for line in t.splitlines()[:400]:
                 line = line.strip()
                 if line and ":" in line and not line.startswith("#"):
                     socks.append(line)
@@ -129,7 +129,7 @@ def free_proxies():
         )
         arr = json.loads(r.read().decode(errors="replace"))
         arr.sort(key=lambda x: x.get("last_checked") or "", reverse=True)
-        for it in arr[:60]:
+        for it in arr[:150]:
             proto = it.get("protocol")
             addr = f"{it.get('ip')}:{it.get('port')}"
             if proto == "http":
@@ -140,11 +140,11 @@ def free_proxies():
         pass
     seen = set()
     pool = []
-    for addr in http[:40]:
+    for addr in http[:300]:
         if addr not in seen:
             seen.add(addr)
             pool.append({"server": "http://" + addr, "kind": "http"})
-    for entry in socks[:40]:
+    for entry in socks[:300]:
         proto, addr = entry if isinstance(entry, tuple) else ("socks5", entry)
         if addr not in seen:
             seen.add(addr)
@@ -219,16 +219,19 @@ def is_full(row):
 
 
 def live_proxies(handle, pool):
-    outs = []
+    # parallel health-check: hundreds of candidates in, up to 25 live exits out
+    from concurrent.futures import ThreadPoolExecutor
+
     try:
         import requests
 
         have_requests = True
     except Exception:
         have_requests = False
-    for px in pool:
-        if px["kind"] == "http":
-            try:
+
+    def check(px):
+        try:
+            if px["kind"] == "http":
                 op = urllib.request.build_opener(
                     urllib.request.ProxyHandler({"http": px["server"], "https": px["server"]})
                 )
@@ -237,24 +240,27 @@ def live_proxies(handle, pool):
                     headers={"User-Agent": BOT_UAS[0], "Accept": "text/html"},
                 )
                 page = op.open(req, timeout=6).read().decode(errors="replace")
-                if "profilePage_" in page:
-                    outs.append(px)
-            except Exception:
-                continue
-        elif have_requests and px["kind"].startswith("socks"):
-            try:
-                r = requests.get(
+            elif have_requests:
+                page = requests.get(
                     f"https://www.instagram.com/{handle}/",
                     proxies={"http": px["server"], "https": px["server"]},
                     headers={"User-Agent": BOT_UAS[0], "Accept": "text/html"},
                     timeout=6,
-                )
-                if "profilePage_" in r.text:
-                    outs.append(px)
-            except Exception:
-                continue
-        if len(outs) >= 8:
-            break
+                ).text
+            else:
+                return None
+            return px if "profilePage_" in page else None
+        except Exception:
+            return None
+
+    outs = []
+    with ThreadPoolExecutor(max_workers=32) as ex:
+        for px in ex.map(check, pool):
+            if px:
+                outs.append(px)
+                if len(outs) >= 25:
+                    break
+    print("live exits:", len(outs))
     return outs
 
 
