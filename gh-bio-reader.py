@@ -102,7 +102,7 @@ def free_proxies():
         if px not in seen:
             seen.add(px)
             dedup.append(px)
-    return dedup[:40]
+    return dedup[:24]
 
 
 def read_via_proxies(handle):
@@ -184,7 +184,7 @@ def live_proxies(handle):
                 f"https://www.instagram.com/{handle}/",
                 headers={"User-Agent": BOT_UAS[0], "Accept": "text/html"},
             )
-            page = op.open(req, timeout=8).read().decode(errors="replace")
+            page = op.open(req, timeout=6).read().decode(errors="replace")
             if "profilePage_" in page:
                 outs.append(px)
         except Exception:
