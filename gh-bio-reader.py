@@ -156,11 +156,10 @@ def read_api(handle, proxy=None):
 
 
 def is_full(row):
-    # Instagram serves cloud IPs a degraded page variant that carries the
-    # account id but strips the bio section (proven 2026-09-24, graycie.png:
-    # 639KB id-page vs 940KB full page). Only full pages are real reads;
-    # anything else is a wall and must be retried, never reported as a bio.
-    if row.get("len", 0) >= 800000:
+    # a page read only counts when the bio section actually carries text, or
+    # when it came from the api (len marker 999999). degraded variants carry
+    # the id but strip the bio (proven 2026-09-24)
+    if row.get("len", 0) >= 999999:
         return True
     return bool(re.search(r'on Instagram: "[^"]+"', row.get("bio") or ""))
 
