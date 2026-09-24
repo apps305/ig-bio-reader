@@ -127,6 +127,34 @@ def read_via_proxies(handle):
     return None
 
 
+def read_api(handle, proxy=None):
+    # the exact endpoint a logged-out browser uses to render the bio; through
+    # a home IP it returns the authoritative biography json
+    url = "https://www.instagram.com/api/v1/users/web_profile_info/?username=" + handle
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "X-IG-App-ID": "936619743392459",
+        "Accept": "*/*",
+    }
+    if proxy:
+        op = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": "http://" + proxy, "https": "http://" + proxy})
+        )
+    else:
+        op = urllib.request.build_opener()
+    page = op.open(urllib.request.Request(url, headers=headers), timeout=20).read().decode(errors="replace")
+    u = ((json.loads(page).get("data") or {}).get("user")) or {}
+    if not u.get("id"):
+        return None
+    return {
+        "bio": u.get("biography") or "",
+        "owner_id": str(u.get("id")),
+        "owner_username": u.get("username") or handle,
+        "len": 999999,
+    }
+
+
 def is_full(row):
     # Instagram serves cloud IPs a degraded page variant that carries the
     # account id but strips the bio section (proven 2026-09-24, graycie.png:
@@ -162,26 +190,41 @@ def main():
     for job in jobs:
         handle = job["handle"]
         row = {"handle": handle, "source": "gh-actions-runner"}
-        for ua in BOT_UAS + [UA]:
-            try:
-                html = get(
-                    f"https://www.instagram.com/{handle}/",
-                    headers=dict(HEADERS, **{"User-Agent": ua}),
-                )
-                parsed = parse_profile(html)
-                row.update(parsed)
-                row["len"] = len(html)
-                row["ua"] = ua[:30]
-                # the login-wall page has a welcome-text description meta but
-                # no numeric id; only a page with the id is a real profile
-                if row.get("owner_id") and is_full(row):
+        got = None
+        try:
+            got = read_api(handle)
+            if got:
+                got["source"] = "gh-api"
+        except Exception as e:
+            row["error"] = f"api: {type(e).__name__}"
+        if not got:
+            for ua in BOT_UAS + [UA]:
+                try:
+                    html = get(
+                        f"https://www.instagram.com/{handle}/",
+                        headers=dict(HEADERS, **{"User-Agent": ua}),
+                    )
+                    parsed = parse_profile(html)
+                    parsed["len"] = len(html)
+                    parsed["ua"] = ua[:30]
+                    if parsed.get("owner_id") and is_full(parsed):
+                        got = parsed
+                        break
+                except Exception as e:
+                    row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
+        if not got:
+            for px in free_proxies():
+                try:
+                    got = read_api(handle, px)
+                    got["source"] = "gh-api-proxy"
+                    got["proxy"] = px
                     break
-            except Exception as e:
-                row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
-        if not (row.get("owner_id") and is_full(row)):
-            proxied = read_via_proxies(handle)
-            if proxied:
-                row.update(proxied)
+                except Exception:
+                    continue
+        if not got:
+            got = read_via_proxies(handle)
+        if got:
+            row.update(got)
         print(json.dumps(row)[:400])
         if row.get("owner_id") and is_full(row):
             report(row)
