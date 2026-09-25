@@ -393,28 +393,33 @@ def mirror_bio(handle, proxy=None, code=""):
         ("pixwox", f"https://www.pixwox.com/profile/{handle}/"),
         ("picuki", f"https://www.picuki.com/profile/{handle}"),
         ("greatfon", f"https://greatfon.com/profile/{handle}"),
+        ("gramhir", f"https://gramhir.com/profile/{handle}"),
+        ("instanav", f"https://instanavigation.com/profile/{handle}"),
+        ("pixnoy", f"https://www.pixnoy.com/profile/{handle}/"),
+        ("storiesig", f"https://storiesig.info/profile/{handle}"),
     ]
     for name, url in mirrors:
         try:
             html = get(url)
         except Exception:
             continue
-        txt = ""
-        m = re.search(r'<(?:div|p|span)[^>]*class="[^"]*(?:bio|description|full-info)[^"]*"[^>]*>(.*?)</(?:div|p|span)>', html, re.S | re.I)
-        if m:
-            txt = re.sub(r"<[^>]+>", " ", m.group(1))
-            txt = html_mod.unescape(re.sub(r"\s+", " ", txt)).strip()
-        if txt and re.search(r"^(followers|following|posts|views|stories|highlights)\b", txt, re.I) or re.search(
-            r"copyright|privacy policy|terms of service", txt or "", re.I
-        ):
-            txt = ""
-        if len(txt) < 3:
+        cands = []
+        for m in re.finditer(r'<(?:div|p|span)[^>]*class="[^"]*(?:bio|description|full-info)[^"]*"[^>]*>(.*?)</(?:div|p|span)>', html, re.S | re.I):
+            t = re.sub(r"<[^>]+>", " ", m.group(1))
+            t = html_mod.unescape(re.sub(r"\s+", " ", t)).strip()
+            if len(t) > 2:
+                cands.append(t)
+        if not cands:
             m = re.search(r'<meta\s+property="og:description"\s+content="([^"]*)"', html)
             if m:
                 cand = html_mod.unescape(m.group(1)).strip()
                 if cand and not re.match(r"[\d.,]+\s+Followers,\s*[\d.,]+\s+Following,\s*[\d.,]+\s+Posts", cand):
-                    txt = cand
-        if len(txt) > 2:
+                    cands.append(cand)
+        for txt in cands:
+            if re.search(r"^(followers|following|posts|views|stories|highlights)\b", txt, re.I) or re.search(
+                r"copyright|privacy policy|terms of service|anonymously without logging in", txt, re.I
+            ):
+                continue
             if code and code.lower() not in txt.lower():
                 print("mirror", handle, name, "container lacks code:", txt[:120])
                 continue
