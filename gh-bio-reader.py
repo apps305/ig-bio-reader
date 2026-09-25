@@ -99,7 +99,7 @@ def free_proxies():
                         http.append(str(it["ip"]) + ":" + str(it["port"]))
             else:
                 t = urllib.request.urlopen(src, timeout=20).read().decode(errors="replace")
-                for line in t.splitlines()[:400]:
+                for line in t.splitlines()[:1500]:
                     line = line.strip()
                     if line and ":" in line and not line.startswith("#"):
                         http.append(line)
@@ -108,7 +108,7 @@ def free_proxies():
     for src in sock_srcs:
         try:
             t = urllib.request.urlopen(src, timeout=20).read().decode(errors="replace")
-            for line in t.splitlines()[:400]:
+            for line in t.splitlines()[:1500]:
                 line = line.strip()
                 if line and ":" in line and not line.startswith("#"):
                     socks.append(line)
@@ -131,7 +131,7 @@ def free_proxies():
         )
         arr = json.loads(r.read().decode(errors="replace"))
         arr.sort(key=lambda x: x.get("last_checked") or "", reverse=True)
-        for it in arr[:150]:
+        for it in arr[:400]:
             proto = it.get("protocol")
             addr = f"{it.get('ip')}:{it.get('port')}"
             if proto == "http":
@@ -142,11 +142,11 @@ def free_proxies():
         pass
     seen = set()
     pool = []
-    for addr in http[:300]:
+    for addr in http[:600]:
         if addr not in seen:
             seen.add(addr)
             pool.append({"server": "http://" + addr, "kind": "http"})
-    for entry in socks[:300]:
+    for entry in socks[:600]:
         proto, addr = entry if isinstance(entry, tuple) else ("socks5", entry)
         if addr not in seen:
             seen.add(addr)
@@ -256,11 +256,11 @@ def live_proxies(handle, pool):
             return None
 
     outs = []
-    with ThreadPoolExecutor(max_workers=32) as ex:
+    with ThreadPoolExecutor(max_workers=64) as ex:
         for px in ex.map(check, pool):
             if px:
                 outs.append(px)
-                if len(outs) >= 25:
+                if len(outs) >= 60:
                     break
     print("live exits:", len(outs))
     return outs
