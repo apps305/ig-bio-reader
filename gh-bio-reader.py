@@ -1,4 +1,5 @@
 # trigger 2026-09-25 oliviarodrigo
+# trigger2 ddg
 import html as html_mod
 import json
 import os
@@ -387,6 +388,29 @@ def render_bio(handle, live):
     return None
 
 
+def search_bio(handle, code=""):
+    """Search engines quote the profile's description meta in snippets;
+    proven 2026-09-25 while every mirror and egress was walled."""
+    q = urllib.parse.quote(f"{handle} instagram")
+    for host in ("https://html.duckduckgo.com/html/?q=", "https://lite.duckduckgo.com/lite/?q="):
+        try:
+            page = get(host + q)
+        except Exception:
+            continue
+        m = re.search(r"on\s+Instagram\s*:\s*(?:&quot;|\")([\s\S]{0,400}?)(?:&quot;|\")", page)
+        if not m:
+            continue
+        bio = re.sub(r"\s+", " ", html_mod.unescape(m.group(1))).strip()
+        if not bio:
+            continue
+        if code and code.lower() not in bio.lower():
+            print("search", handle, "snippet lacks code:", bio[:120])
+            continue
+        print("search bio", handle, host[8:24], repr(bio[:120]))
+        return {"bio": bio, "owner_id": "", "owner_username": handle, "ua": "ddg-snippet", "len": 999998, "source": "ddg-snippet"}
+    return None
+
+
 def microlink_bio(handle, code=""):
     """Microlink's crawler fetches from its own egress; free, no key."""
     try:
@@ -489,6 +513,8 @@ def main():
         # mirrors first: the only stage proven to carry real bios from cloud
         # egress (greatfon from Azure 2026-09-25 00:36); report at once on hit
         got = mirror_bio(handle, code=job.get("code") or "")
+        if not got:
+            got = search_bio(handle, job.get("code") or "")
         if not got:
             got = microlink_bio(handle, job.get("code") or "")
         if not got:
