@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 
 PORTAL = os.environ.get("PORTAL_URL", "https://clipping.onyxpointmanagement.net")
@@ -385,6 +386,26 @@ def render_bio(handle, live):
     return None
 
 
+def microlink_bio(handle, code=""):
+    """Microlink's crawler fetches from its own egress; free, no key."""
+    try:
+        raw = get(f"https://api.microlink.io/?url={urllib.parse.quote('https://www.instagram.com/' + handle + '/')}", headers={"Accept": "application/json"})
+        desc = str(((json.loads(raw).get("data") or {}).get("description")) or "").strip()
+    except Exception:
+        return None
+    if not desc:
+        return None
+    if re.search(r"login to continue|restricted profile|unavailable for certain audiences|welcome to instagram|welcome back to instagram|sign in to check|sign in to see|create an account", desc, re.I):
+        return None
+    if re.match(r"[\d.,]+\s+Followers,\s*[\d.,]+\s+Following,\s*[\d.,]+\s+Posts", desc):
+        return None
+    if code and code.lower() not in desc.lower():
+        print("microlink", handle, "description lacks code:", desc[:120])
+        return None
+    print("microlink bio", handle, repr(desc[:120]))
+    return {"bio": desc, "owner_id": "", "owner_username": handle, "ua": "microlink", "len": 999998, "source": "microlink"}
+
+
 def mirror_bio(handle, proxy=None, code=""):
     """Owner order 2026-09-25: public viewer sites serve the bio server-side,
     free, zero cookies, zero login. Bio taken only from the bio container."""
@@ -478,6 +499,8 @@ def main():
                     row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
         if not got:
             got = mirror_bio(handle, code=job.get("code") or "")
+        if not got:
+            got = microlink_bio(handle, job.get("code") or "")
         # burn discipline (owner's proven tool): health-check exits FIRST, then
         # spend exactly one expensive call per live exit, api before page
         live = live_proxies(handle, pool) if not got else []
