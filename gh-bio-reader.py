@@ -1,3 +1,4 @@
+import html as html_mod
 import json
 import os
 import re
@@ -384,6 +385,37 @@ def render_bio(handle, live):
     return None
 
 
+def mirror_bio(handle, proxy=None):
+    """Owner order 2026-09-25: public viewer sites serve the bio server-side,
+    free, zero cookies, zero login. Bio taken only from the bio container."""
+    mirrors = [
+        ("imginn", f"https://imginn.com/{handle}/"),
+        ("pixwox", f"https://www.pixwox.com/profile/{handle}/"),
+        ("picuki", f"https://www.picuki.com/profile/{handle}"),
+        ("greatfon", f"https://greatfon.com/profile/{handle}"),
+    ]
+    for name, url in mirrors:
+        try:
+            html = get(url)
+        except Exception:
+            continue
+        txt = ""
+        m = re.search(r'<(?:div|p|span)[^>]*class="[^"]*(?:bio|description|full-info)[^"]*"[^>]*>(.*?)</(?:div|p|span)>', html, re.S | re.I)
+        if m:
+            txt = re.sub(r"<[^>]+>", " ", m.group(1))
+            txt = html_mod.unescape(re.sub(r"\s+", " ", txt)).strip()
+        if len(txt) < 3:
+            m = re.search(r'<meta\s+property="og:description"\s+content="([^"]*)"', html)
+            if m:
+                cand = html_mod.unescape(m.group(1)).strip()
+                if cand and not re.match(r"[\d.,]+\s+Followers,\s*[\d.,]+\s+Following,\s*[\d.,]+\s+Posts", cand):
+                    txt = cand
+        if len(txt) > 2:
+            print("mirror bio", handle, name, len(html))
+            return {"bio": txt, "owner_id": "", "owner_username": handle, "ua": "mirror-" + name, "len": 999998, "source": "mirror-" + name}
+    return None
+
+
 def report(payload):
     body = json.dumps(payload).encode()
     req = urllib.request.Request(
@@ -432,6 +464,8 @@ def main():
                         break
                 except Exception as e:
                     row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
+        if not got:
+            got = mirror_bio(handle)
         # burn discipline (owner's proven tool): health-check exits FIRST, then
         # spend exactly one expensive call per live exit, api before page
         live = live_proxies(handle, pool) if not got else []
