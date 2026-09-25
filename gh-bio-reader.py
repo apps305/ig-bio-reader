@@ -404,6 +404,10 @@ def mirror_bio(handle, proxy=None):
         if m:
             txt = re.sub(r"<[^>]+>", " ", m.group(1))
             txt = html_mod.unescape(re.sub(r"\s+", " ", txt)).strip()
+        if txt and re.search(r"^(followers|following|posts|views|stories|highlights)\b", txt, re.I) or re.search(
+            r"copyright|privacy policy|terms of service", txt or "", re.I
+        ):
+            txt = ""
         if len(txt) < 3:
             m = re.search(r'<meta\s+property="og:description"\s+content="([^"]*)"', html)
             if m:
