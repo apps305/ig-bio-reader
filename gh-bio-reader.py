@@ -78,42 +78,60 @@ BOT_UAS = [
 
 
 def free_proxies():
-    # mixed pool: http entries plus socks5 entries, whose pools carry far more
-    # residential exits; playwright speaks socks5 natively
+    # owner order 2026-09-25: proxies dead means go find new ones. every free
+    # no-key source publishing http/socks lists, refreshed on every run
     http, socks = [], []
     http_srcs = [
-        "https://proxylist.geonode.com/api/proxy-list?limit=50&sort_by=lastChecked",
+        "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked",
+        "https://proxylist.geonode.com/api/proxy-list?limit=500&page=2&sort_by=lastChecked",
         "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all",
         "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
         "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+        "https://www.proxy-list.download/api/v1/get?type=http",
+        "https://www.proxy-list.download/api/v1/get?type=https",
+        "https://raw.githubusercontent.com/mertguvenc/http-proxy-list/main/proxies/data.txt",
+        "https://raw.githubusercontent.com/aslisk/proxyhttps/main/https.txt",
+        "https://raw.githubusercontent.com/hanwayTech/free-proxy-list/main/http.txt",
+        "https://raw.githubusercontent.com/ALIILPRO/proxy-list/main/proxies.txt",
+        "https://raw.githubusercontent.com/MyIPHide/proxy-list/main/proxies.txt",
+        "https://raw.githubusercontent.com/fate0/proxylist/master/proxy.list",
     ]
     sock_srcs = [
         "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=10000&country=all",
+        "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks4&timeout=10000&country=all",
         "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt",
         "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt",
+        "https://www.proxy-list.download/api/v1/get?type=socks5",
+        "https://www.proxy-list.download/api/v1/get?type=socks4",
+        "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
+        "https://raw.githubusercontent.com/manuGMG/proxy-365/master/SOCKS5.txt",
+        "https://raw.githubusercontent.com/hanwayTech/free-proxy-list/main/socks5.txt",
     ]
     for src in http_srcs:
         try:
             if "geonode" in src:
                 r = urllib.request.urlopen(src, timeout=15)
-                for it in json.loads(r.read().decode(errors="replace"))[:100]:
+                for it in json.loads(r.read().decode(errors="replace"))[:500]:
                     if "http" in (it.get("protocols") or []):
                         http.append(str(it["ip"]) + ":" + str(it["port"]))
             else:
                 t = urllib.request.urlopen(src, timeout=20).read().decode(errors="replace")
-                for line in t.splitlines()[:1500]:
+                for line in t.splitlines()[:3000]:
                     line = line.strip()
-                    if line and ":" in line and not line.startswith("#"):
+                    if line and ":" in line and line[0].isdigit() and not line.startswith("#"):
                         http.append(line)
         except Exception:
             continue
     for src in sock_srcs:
         try:
             t = urllib.request.urlopen(src, timeout=20).read().decode(errors="replace")
-            for line in t.splitlines()[:1500]:
+            proto = "socks4" if "socks4" in src else "socks5"
+            for line in t.splitlines()[:3000]:
                 line = line.strip()
-                if line and ":" in line and not line.startswith("#"):
-                    socks.append(line)
+                if line and ":" in line and line[0].isdigit() and not line.startswith("#"):
+                    socks.append((proto, line))
         except Exception:
             continue
     # the sources the owner's own working scraper uses (proven in production)
@@ -127,15 +145,31 @@ def free_proxies():
                 http.append(f"{it['ip']}:{it['port']}")
     except Exception:
         pass
+    for src in (
+        "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks4/data.json",
+        "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.json",
+    ):
+        try:
+            r = urllib.request.urlopen(src, timeout=15)
+            proto = "socks4" if "socks4" in src else "socks5"
+            for it in json.loads(r.read().decode(errors="replace")):
+                if it.get("proxy"):
+                    socks.append((proto, str(it["proxy"])))
+        except Exception:
+            pass
     try:
         r = urllib.request.urlopen(
             "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies.json", timeout=20
         )
         arr = json.loads(r.read().decode(errors="replace"))
         arr.sort(key=lambda x: x.get("last_checked") or "", reverse=True)
-        for it in arr[:400]:
-            proto = it.get("protocol")
+        cloud = "amazon|aws|google|microsoft|azure|alibaba|tencent|digitalocean|ovh|hetzner|vultr|linode|oracle|cloudflare|hostinger|contabo|scaleway|ibm|cloud|hosting|vps|server|datacenter"
+        for it in arr[:1500]:
+            org = str((it.get("asn") or {}).get("autonomous_system_organization") or "").lower()
+            if org and re.search(cloud, org):
+                continue
             addr = f"{it.get('ip')}:{it.get('port')}"
+            proto = it.get("protocol")
             if proto == "http":
                 http.append(addr)
             elif proto in ("socks4", "socks5"):
@@ -144,15 +178,16 @@ def free_proxies():
         pass
     seen = set()
     pool = []
-    for addr in http[:600]:
+    for addr in http[:3000]:
         if addr not in seen:
             seen.add(addr)
             pool.append({"server": "http://" + addr, "kind": "http"})
-    for entry in socks[:600]:
+    for entry in socks[:3000]:
         proto, addr = entry if isinstance(entry, tuple) else ("socks5", entry)
         if addr not in seen:
             seen.add(addr)
             pool.append({"server": f"{proto}://" + addr, "kind": proto})
+    print("proxy pool candidates:", len(pool))
     return pool
 
 
@@ -415,6 +450,23 @@ def search_bio(handle, code=""):
         ("baidu", f"https://www.baidu.com/s?wd={q}"),
         ("naver", f"https://search.naver.com/search.naver?query={q}"),
     )
+    if code:
+        qc = urllib.parse.quote(f'{handle} "{code}" instagram')
+        qc2 = urllib.parse.quote(f"{code} {handle} instagram")
+        engines = engines + (
+            ("ddg-code", f"https://html.duckduckgo.com/html/?q={qc}"),
+            ("ddg-code2", f"https://lite.duckduckgo.com/lite/?q={qc2}"),
+            ("bing-code", f"https://www.bing.com/search?q={qc}"),
+            ("bing-code2", f"https://www.bing.com/search?q={qc2}"),
+            ("google-code", f"https://www.google.com/search?q={qc}&num=20"),
+            ("google-code2", f"https://www.google.com/search?q={qc2}&num=20"),
+            ("mojeek-code", f"https://www.mojeek.com/search?q={qc}"),
+            ("ecosia-code", f"https://www.ecosia.org/search?q={qc}"),
+            ("yandex-code", f"https://yandex.com/search/?text={qc}"),
+            ("startpage-code", f"https://www.startpage.com/sp/search?query={qc}"),
+            ("brave-code", f"https://search.brave.com/search?q={qc}"),
+            ("ask-code", f"https://www.ask.com/web?q={qc}"),
+        )
     def one_engine(entry):
         name, url = entry
         try:
@@ -552,8 +604,6 @@ def main():
         # egress (greatfon from Azure 2026-09-25 00:36); report at once on hit
         got = mirror_bio(handle, code=job.get("code") or "")
         if not got:
-            got = search_bio(handle, job.get("code") or "")
-        if not got:
             got = microlink_bio(handle, job.get("code") or "")
         if not got:
             try:
@@ -577,15 +627,8 @@ def main():
                         break
                 except Exception as e:
                     row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
-        # burn discipline (owner's proven tool): health-check exits FIRST, then
-        # spend exactly one expensive call per live exit, api before page
-        if not got and not job.get("shortcode"):
-            # bio-only job and the fast stages missed: report and exit instead
-            # of burning Actions minutes on proxy races and renders that
-            # almost never hit (owner question 2026-09-25: minute burn)
-            print("fast stages missed; reporting fail early")
-            report(row)
-            continue
+        # owner order 2026-09-25: scrape instagram directly; no early exit, the
+        # proxy and render stages ARE the direct path in closed windows
         live = live_proxies(handle, pool) if not got else []
         if not got:
             for px in live:
@@ -603,7 +646,10 @@ def main():
         if not got:
             got = read_jina(handle)
         if not got:
-            got = render_bio(handle, live)
+            # socks exits skip the http health check (urllib cannot speak
+            # socks); playwright can, and dead ones fail fast at connect
+            socksx = [p for p in pool if p["kind"] != "http"][:25]
+            got = render_bio(handle, live + socksx)
         if got:
             row.update(got)
         print(json.dumps(row)[:400])
