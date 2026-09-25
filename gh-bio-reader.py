@@ -476,12 +476,18 @@ def main():
         row = {"handle": handle, "source": "gh-actions-runner"}
         pool = free_proxies()
         got = None
-        try:
-            got = read_api(handle)
-            if got:
-                got["source"] = "gh-api"
-        except Exception as e:
-            row["error"] = f"api: {type(e).__name__}"
+        # mirrors first: the only stage proven to carry real bios from cloud
+        # egress (greatfon from Azure 2026-09-25 00:36); report at once on hit
+        got = mirror_bio(handle, code=job.get("code") or "")
+        if not got:
+            got = microlink_bio(handle, job.get("code") or "")
+        if not got:
+            try:
+                got = read_api(handle)
+                if got:
+                    got["source"] = "gh-api"
+            except Exception as e:
+                row["error"] = f"api: {type(e).__name__}"
         if not got:
             for ua in BOT_UAS + [UA]:
                 try:
@@ -497,10 +503,6 @@ def main():
                         break
                 except Exception as e:
                     row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
-        if not got:
-            got = mirror_bio(handle, code=job.get("code") or "")
-        if not got:
-            got = microlink_bio(handle, job.get("code") or "")
         # burn discipline (owner's proven tool): health-check exits FIRST, then
         # spend exactly one expensive call per live exit, api before page
         live = live_proxies(handle, pool) if not got else []
