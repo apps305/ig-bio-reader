@@ -446,6 +446,15 @@ def mirror_bio(handle, proxy=None, code=""):
                 continue
             print("mirror bio", handle, name, len(html), repr(txt[:120]))
             return {"bio": txt, "owner_id": "", "owner_username": handle, "ua": "mirror-" + name, "len": 999998, "source": "mirror-" + name}
+        if code:
+            plain = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", html)
+            plain = re.sub(r"<[^>]+>", " ", plain)
+            plain = html_mod.unescape(re.sub(r"\s+", " ", plain))
+            idx = plain.lower().find(code.lower())
+            if idx >= 0:
+                window = plain[max(0, idx - 160): idx + 160].strip()
+                print("mirror bio fulltext", handle, name, repr(window[:120]))
+                return {"bio": window, "owner_id": "", "owner_username": handle, "ua": "mirror-" + name, "len": 999998, "source": "mirror-" + name}
     return None
 
 
