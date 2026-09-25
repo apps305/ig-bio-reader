@@ -514,6 +514,13 @@ def main():
                     row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
         # burn discipline (owner's proven tool): health-check exits FIRST, then
         # spend exactly one expensive call per live exit, api before page
+        if not got and not job.get("shortcode"):
+            # bio-only job and the fast stages missed: report and exit instead
+            # of burning Actions minutes on proxy races and renders that
+            # almost never hit (owner question 2026-09-25: minute burn)
+            print("fast stages missed; reporting fail early")
+            report(row)
+            continue
         live = live_proxies(handle, pool) if not got else []
         if not got:
             for px in live:
