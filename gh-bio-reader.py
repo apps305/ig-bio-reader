@@ -389,25 +389,42 @@ def render_bio(handle, live):
 
 
 def search_bio(handle, code=""):
-    """Search engines quote the profile's description meta in snippets;
-    proven 2026-09-25 while every mirror and egress was walled."""
+    """Search engines quote the profile's description in snippets; proven
+    2026-09-25 while every mirror and egress was walled."""
     q = urllib.parse.quote(f"{handle} instagram")
-    for host in ("https://html.duckduckgo.com/html/?q=", "https://lite.duckduckgo.com/lite/?q="):
+    qu = urllib.parse.quote(f"site:instagram.com {handle}")
+    engines = (
+        ("ddg-html", f"https://html.duckduckgo.com/html/?q={q}"),
+        ("ddg-lite", f"https://lite.duckduckgo.com/lite/?q={q}"),
+        ("bing", f"https://www.bing.com/search?q={qu}"),
+        ("bing2", f"https://www.bing.com/search?q={q}"),
+        ("mojeek", f"https://www.mojeek.com/search?q={q}"),
+        ("ecosia", f"https://www.ecosia.org/search?q={q}"),
+        ("yandex", f"https://yandex.com/search/?text={q}"),
+        ("google", f"https://www.google.com/search?q={q}&num=20"),
+    )
+    for name, url in engines:
         try:
-            page = get(host + q)
+            page = get(url)
         except Exception:
             continue
+        if len(page) < 1000:
+            continue
         m = re.search(r"on\s+Instagram\s*:\s*(?:&quot;|\")([\s\S]{0,400}?)(?:&quot;|\")", page)
-        if not m:
-            continue
-        bio = re.sub(r"\s+", " ", html_mod.unescape(m.group(1))).strip()
-        if not bio:
-            continue
-        if code and code.lower() not in bio.lower():
-            print("search", handle, "snippet lacks code:", bio[:120])
-            continue
-        print("search bio", handle, host[8:24], repr(bio[:120]))
-        return {"bio": bio, "owner_id": "", "owner_username": handle, "ua": "ddg-snippet", "len": 999998, "source": "ddg-snippet"}
+        if m:
+            bio = re.sub(r"\s+", " ", html_mod.unescape(m.group(1))).strip()
+            if bio and (not code or code.lower() in bio.lower()):
+                print("search bio", handle, name, repr(bio[:120]))
+                return {"bio": bio, "owner_id": "", "owner_username": handle, "ua": name, "len": 999998, "source": name}
+        if code:
+            plain = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", page)
+            plain = re.sub(r"<[^>]+>", " ", plain)
+            plain = html_mod.unescape(re.sub(r"\s+", " ", plain))
+            ci = plain.lower().find(code.lower())
+            if ci >= 0 and handle in plain[max(0, ci - 300): ci + 300].lower():
+                window = plain[max(0, ci - 160): ci + 160].strip()
+                print("search bio snippet", handle, name, repr(window[:120]))
+                return {"bio": window, "owner_id": "", "owner_username": handle, "ua": name + "-snippet", "len": 999998, "source": name + "-snippet"}
     return None
 
 
