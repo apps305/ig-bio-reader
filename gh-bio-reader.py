@@ -393,23 +393,36 @@ def search_bio(handle, code=""):
     2026-09-25 while every mirror and egress was walled."""
     q = urllib.parse.quote(f"{handle} instagram")
     qu = urllib.parse.quote(f"site:instagram.com {handle}")
+    qh = urllib.parse.quote(handle)
     engines = (
         ("ddg-html", f"https://html.duckduckgo.com/html/?q={q}"),
         ("ddg-lite", f"https://lite.duckduckgo.com/lite/?q={q}"),
+        ("ddg-handle", f"https://html.duckduckgo.com/html/?q={qh}"),
         ("bing", f"https://www.bing.com/search?q={qu}"),
         ("bing2", f"https://www.bing.com/search?q={q}"),
+        ("bing3", f"https://www.bing.com/search?q={qh}"),
         ("mojeek", f"https://www.mojeek.com/search?q={q}"),
         ("ecosia", f"https://www.ecosia.org/search?q={q}"),
         ("yandex", f"https://yandex.com/search/?text={q}"),
         ("google", f"https://www.google.com/search?q={q}&num=20"),
+        ("google2", f"https://www.google.com/search?q={qu}&num=20"),
+        ("startpage", f"https://www.startpage.com/sp/search?query={q}"),
+        ("aol", f"https://search.aol.com/aol/search?q={q}"),
+        ("ask", f"https://www.ask.com/web?q={q}"),
+        ("qwant", f"https://api.qwant.com/v3/search/web?q={q}&count=10"),
+        ("brave", f"https://search.brave.com/search?q={q}"),
+        ("seznam", f"https://search.seznam.cz/?q={q}"),
+        ("baidu", f"https://www.baidu.com/s?wd={q}"),
+        ("naver", f"https://search.naver.com/search.naver?query={q}"),
     )
-    for name, url in engines:
+    def one_engine(entry):
+        name, url = entry
         try:
             page = get(url)
         except Exception:
-            continue
+            return None
         if len(page) < 1000:
-            continue
+            return None
         m = re.search(r"on\s+Instagram\s*:\s*(?:&quot;|\")([\s\S]{0,400}?)(?:&quot;|\")", page)
         if m:
             bio = re.sub(r"\s+", " ", html_mod.unescape(m.group(1))).strip()
@@ -425,6 +438,14 @@ def search_bio(handle, code=""):
                 window = plain[max(0, ci - 160): ci + 160].strip()
                 print("search bio snippet", handle, name, repr(window[:120]))
                 return {"bio": window, "owner_id": "", "owner_username": handle, "ua": name + "-snippet", "len": 999998, "source": name + "-snippet"}
+        return None
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=19) as ex:
+        for got in ex.map(one_engine, engines):
+            if got:
+                return got
     return None
 
 
