@@ -385,7 +385,7 @@ def render_bio(handle, live):
     return None
 
 
-def mirror_bio(handle, proxy=None):
+def mirror_bio(handle, proxy=None, code=""):
     """Owner order 2026-09-25: public viewer sites serve the bio server-side,
     free, zero cookies, zero login. Bio taken only from the bio container."""
     mirrors = [
@@ -415,7 +415,10 @@ def mirror_bio(handle, proxy=None):
                 if cand and not re.match(r"[\d.,]+\s+Followers,\s*[\d.,]+\s+Following,\s*[\d.,]+\s+Posts", cand):
                     txt = cand
         if len(txt) > 2:
-            print("mirror bio", handle, name, len(html))
+            if code and code.lower() not in txt.lower():
+                print("mirror", handle, name, "container lacks code:", txt[:120])
+                continue
+            print("mirror bio", handle, name, len(html), repr(txt[:120]))
             return {"bio": txt, "owner_id": "", "owner_username": handle, "ua": "mirror-" + name, "len": 999998, "source": "mirror-" + name}
     return None
 
@@ -469,7 +472,7 @@ def main():
                 except Exception as e:
                     row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
         if not got:
-            got = mirror_bio(handle)
+            got = mirror_bio(handle, code=job.get("code") or "")
         # burn discipline (owner's proven tool): health-check exits FIRST, then
         # spend exactly one expensive call per live exit, api before page
         live = live_proxies(handle, pool) if not got else []
