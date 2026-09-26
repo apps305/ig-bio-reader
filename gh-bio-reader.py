@@ -540,7 +540,7 @@ def microlink_bio(handle, code=""):
     return {"bio": desc, "owner_id": "", "owner_username": handle, "ua": "microlink", "len": 999998, "source": "microlink"}
 
 
-def mirror_bio(handle, proxy=None, code=""):
+def mirror_bio(handle, proxy=None, code="", out=None):
     """Owner order 2026-09-25: public viewer sites serve the bio server-side,
     free, zero cookies, zero login. Bio taken only from the bio container."""
     mirrors = [
@@ -579,6 +579,8 @@ def mirror_bio(handle, proxy=None, code=""):
                 continue
             if code and code.lower() not in txt.lower():
                 print("mirror", handle, name, "container lacks code:", txt[:120])
+                if out is not None and not out:
+                    out.append(txt)
                 continue
             print("mirror bio", handle, name, len(html), repr(txt[:120]))
             return {"bio": txt, "owner_id": "", "owner_username": handle, "ua": "mirror-" + name, "len": 999998, "source": "mirror-" + name}
@@ -619,11 +621,12 @@ def main():
     for job in jobs:
         handle = job["handle"]
         row = {"handle": handle, "source": "gh-actions-runner"}
+        ungated = []
         pool = free_proxies()
         got = None
         # mirrors first: the only stage proven to carry real bios from cloud
         # egress (greatfon from Azure 2026-09-25 00:36); report at once on hit
-        got = mirror_bio(handle, code=job.get("code") or "")
+        got = mirror_bio(handle, code=job.get("code") or "", out=ungated)
         if not got:
             got = microlink_bio(handle, job.get("code") or "")
         if not got:
@@ -688,6 +691,8 @@ def main():
             continue
         if got:
             row.update(got)
+        elif ungated:
+            row["ungated_bio"] = ungated[0][:400]
         print(json.dumps(row)[:400])
         if row.get("owner_id") and is_full(row):
             report(row)
