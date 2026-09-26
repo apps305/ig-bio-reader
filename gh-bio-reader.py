@@ -540,6 +540,52 @@ def microlink_bio(handle, code=""):
     return {"bio": desc, "owner_id": "", "owner_username": handle, "ua": "microlink", "len": 999998, "source": "microlink"}
 
 
+def translate_bio(handle, code=""):
+    """Google's website translator fetches the mirror from its own crawler
+    class and serves the transformed page to any caller egress; measured alive
+    at 02:4x UTC 2026-09-26 while every direct reader was walled."""
+    mirrors = (
+        ("pixwox", f"https://www.pixwox.com/profile/{handle}/"),
+        ("pixnoy", f"https://www.pixnoy.com/profile/{handle}/"),
+        ("picuki", f"https://www.picuki.com/profile/{handle}"),
+    )
+    for name, target in mirrors:
+        try:
+            page = get(f"https://translate.google.com/translate?sl=auto&tl=en&u={urllib.parse.quote(target)}")
+        except Exception:
+            continue
+        if len(page) < 5000:
+            continue
+        cands = []
+        for m in re.finditer(r'<(?:div|p|span)[^>]*class="[^"]*(?:sum|info|bio|description|full-info)[^"]*"[^>]*>(.*?)</(?:div|p|span)>', page, re.S | re.I):
+            t = re.sub(r"<[^>]+>", " ", m.group(1))
+            t = html_mod.unescape(re.sub(r"\s+", " ", t)).strip()
+            if len(t) > 2:
+                cands.append(t)
+        for txt in cands:
+            if re.search(r"^(followers|following|posts|views|stories|highlights)\b", txt, re.I) or re.search(
+                r"copyright|privacy policy|terms of service|anonymously without logging in|^view and download|without watermark|public tiktok videos", txt, re.I
+            ):
+                continue
+            if re.match(r"^\d+[a-z]?\s", txt, re.I):
+                continue
+            if code and code.lower() not in txt.lower():
+                print("translate", handle, name, "container lacks code:", txt[:120])
+                continue
+            print("translate bio", handle, name, repr(txt[:120]))
+            return {"bio": txt, "owner_id": "", "owner_username": handle, "ua": "translate-" + name, "len": 999998, "source": "translate-" + name}
+        if code:
+            plain = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", page)
+            plain = re.sub(r"<[^>]+>", " ", plain)
+            plain = html_mod.unescape(re.sub(r"\s+", " ", plain))
+            ci = plain.lower().find(code.lower())
+            if ci >= 0 and handle in plain[max(0, ci - 300): ci + 300].lower():
+                window = plain[max(0, ci - 160): ci + 160].strip()
+                print("translate bio fulltext", handle, name, repr(window[:120]))
+                return {"bio": window, "owner_id": "", "owner_username": handle, "ua": "translate-" + name + "-fulltext", "len": 999998, "source": "translate-" + name}
+    return None
+
+
 def mirror_bio(handle, proxy=None, code="", out=None):
     """Owner order 2026-09-25: public viewer sites serve the bio server-side,
     free, zero cookies, zero login. Bio taken only from the bio container."""
@@ -626,7 +672,9 @@ def main():
         got = None
         # mirrors first: the only stage proven to carry real bios from cloud
         # egress (greatfon from Azure 2026-09-25 00:36); report at once on hit
-        got = mirror_bio(handle, code=job.get("code") or "", out=ungated)
+        got = translate_bio(handle, job.get("code") or "")
+        if not got:
+            got = mirror_bio(handle, code=job.get("code") or "", out=ungated)
         if not got:
             got = microlink_bio(handle, job.get("code") or "")
         if not got:
