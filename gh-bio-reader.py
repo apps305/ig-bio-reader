@@ -751,6 +751,7 @@ def main():
             row.update(got)
         elif ungated:
             row["ungated_bio"] = ungated[0][:400]
+        row["poster"] = "azure-gh"
         print(json.dumps(row)[:400])
         if row.get("owner_id") and is_full(row):
             report(row)
