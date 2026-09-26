@@ -201,8 +201,11 @@ def free_proxies():
 
 def read_via_proxies(handle, pool):
     # Instagram blocks cloud egress for crawler identities (proven 2026-09-24);
-    # through a home-IP proxy the target sees a residential IP instead
-    for px in [p for p in pool if p["kind"] == "http"]:
+    # through a home-IP proxy the target sees a residential IP instead.
+    # parallel first-win: sequential grinding burned whole runs (owner 2026-09-26)
+    httpx_list = [p for p in pool if p["kind"] == "http"][:20]
+
+    def try_one(px):
         for ua in BOT_UAS[:3]:
             try:
                 op = urllib.request.build_opener(
@@ -216,7 +219,7 @@ def read_via_proxies(handle, pool):
                         "Accept-Language": "en-US,en;q=0.9",
                     },
                 )
-                page = op.open(req, timeout=20).read().decode(errors="replace")
+                page = op.open(req, timeout=10).read().decode(errors="replace")
             except Exception:
                 continue
             row = parse_profile(page)
@@ -225,6 +228,14 @@ def read_via_proxies(handle, pool):
                 row["ua"] = ua[:30]
                 row["proxy"] = px["server"]
                 return row
+        return None
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        for got in ex.map(try_one, httpx_list):
+            if got:
+                return got
     return None
 
 
@@ -301,11 +312,11 @@ def live_proxies(handle, pool):
             return None
 
     outs = []
-    with ThreadPoolExecutor(max_workers=64) as ex:
+    with ThreadPoolExecutor(max_workers=128) as ex:
         for px in ex.map(check, pool):
             if px:
                 outs.append(px)
-                if len(outs) >= 60:
+                if len(outs) >= 40:
                     break
     print("live exits:", len(outs))
     return outs
@@ -638,17 +649,25 @@ def main():
         # owner order 2026-09-25: scrape instagram directly; no early exit, the
         # proxy and render stages ARE the direct path in closed windows
         live = live_proxies(handle, pool) if not got else []
-        if not got:
-            for px in live:
+        if not got and live:
+            def api_try(px):
                 if px["kind"] != "http":
-                    continue
+                    return None
                 try:
-                    got = read_api(handle, px["server"][7:])
-                    got["source"] = "gh-api-proxy"
-                    got["proxy"] = px["server"]
-                    break
+                    g = read_api(handle, px["server"][7:])
+                    g["source"] = "gh-api-proxy"
+                    g["proxy"] = px["server"]
+                    return g
                 except Exception:
-                    continue
+                    return None
+
+            from concurrent.futures import ThreadPoolExecutor as TPE
+
+            with TPE(max_workers=12) as ex:
+                for g in ex.map(api_try, live[:12]):
+                    if g:
+                        got = g
+                        break
         if not got:
             got = read_via_proxies(handle, live)
         if not got:
