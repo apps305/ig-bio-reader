@@ -653,11 +653,18 @@ def main():
             got = read_via_proxies(handle, live)
         if not got:
             got = read_jina(handle)
-        if not got:
+        if not got and live:
             # socks exits skip the http health check (urllib cannot speak
             # socks); playwright can, and dead ones fail fast at connect
             socksx = [p for p in pool if p["kind"] != "http"][:25]
             got = render_bio(handle, live + socksx)
+        if not got and not live:
+            # no live exit and every direct stage missed: report and finish
+            # fast instead of burning the run on renders that cannot connect
+            print("no live exits; reporting fail early")
+            row["error"] = "no live exits"
+            report(row)
+            continue
         if got:
             row.update(got)
         print(json.dumps(row)[:400])

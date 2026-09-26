@@ -22,4 +22,4 @@ jobs:
         with:
           python-version: "3.12"
       - name: Read pending bios from runner egress
-        run: python gh-bio-reader.py
+        run: python -u gh-bio-reader.py
