@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      handle:
+        description: handle to read first
+        required: false
   push:
     paths:
       - "gh-bio-reader.py"
@@ -16,6 +20,7 @@ jobs:
     env:
       BIO_REPORT_KEY: br-4f2a9c71e8d34b6a9f0e2d7c5b8a1346
       PORTAL_URL: https://clipping.onyxpointmanagement.net
+      PENDING_HANDLE: ${{ github.event.inputs.handle }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

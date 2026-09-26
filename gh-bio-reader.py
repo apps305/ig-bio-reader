@@ -660,6 +660,16 @@ def report(payload):
 
 def main():
     jobs = json.loads(get(PORTAL + "/ingest/biojobs")).get("jobs", [])
+    want = os.environ.get("PENDING_HANDLE", "").strip()
+    if want:
+        # a click or connect dispatched this run: that handle first so the
+        # card's poll flips within one Azure run instead of waiting for cron
+        hit = [j for j in jobs if j.get("handle") == want]
+        if hit:
+            jobs = hit + [j for j in jobs if j.get("handle") != want]
+        else:
+            jobs = [{"handle": want}] + jobs
+        print("dispatched handle first:", want)
     if not jobs:
         jobs = [{"handle": "ariakimbaby"}]
         print("no pending jobs; running egress proof handle")
