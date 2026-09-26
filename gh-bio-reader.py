@@ -575,6 +575,8 @@ def mirror_bio(handle, proxy=None, code=""):
                 r"copyright|privacy policy|terms of service|anonymously without logging in", txt, re.I
             ):
                 continue
+            if re.search(r"^view and download|without watermark|public tiktok videos", txt, re.I):
+                continue
             if code and code.lower() not in txt.lower():
                 print("mirror", handle, name, "container lacks code:", txt[:120])
                 continue
