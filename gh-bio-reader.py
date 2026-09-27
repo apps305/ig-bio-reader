@@ -556,6 +556,8 @@ def translate_bio(handle, code=""):
             continue
         if len(page) < 5000:
             continue
+        mid = re.search(r"profilePage_(\d+)", page)
+        uid = mid.group(1) if mid else ""
         cands = []
         for m in re.finditer(r'<(?:div|p|span)[^>]*class="[^"]*(?:sum|info|bio|description|full-info)[^"]*"[^>]*>(.*?)</(?:div|p|span)>', page, re.S | re.I):
             t = re.sub(r"<[^>]+>", " ", m.group(1))
@@ -573,7 +575,7 @@ def translate_bio(handle, code=""):
                 print("translate", handle, name, "container lacks code:", txt[:120])
                 continue
             print("translate bio", handle, name, repr(txt[:120]))
-            return {"bio": txt, "owner_id": "", "owner_username": handle, "ua": "translate-" + name, "len": 999998, "source": "translate-" + name}
+            return {"bio": txt, "owner_id": uid, "owner_username": handle, "ua": "translate-" + name, "len": 999998, "source": "translate-" + name}
         if code:
             plain = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", page)
             plain = re.sub(r"<[^>]+>", " ", plain)
@@ -582,7 +584,7 @@ def translate_bio(handle, code=""):
             if ci >= 0 and handle in plain[max(0, ci - 300): ci + 300].lower():
                 window = plain[max(0, ci - 160): ci + 160].strip()
                 print("translate bio fulltext", handle, name, repr(window[:120]))
-                return {"bio": window, "owner_id": "", "owner_username": handle, "ua": "translate-" + name + "-fulltext", "len": 999998, "source": "translate-" + name}
+                return {"bio": window, "owner_id": uid, "owner_username": handle, "ua": "translate-" + name + "-fulltext", "len": 999998, "source": "translate-" + name}
     return None
 
 
