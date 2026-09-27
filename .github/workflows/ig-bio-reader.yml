@@ -10,6 +10,9 @@ on:
       handle:
         description: handle to read first
         required: false
+      reel:
+        description: single reel code to read views+likes for
+        required: false
   push:
     paths:
       - "gh-bio-reader.py"
@@ -23,6 +26,7 @@ jobs:
       BIO_REPORT_KEY: br-4f2a9c71e8d34b6a9f0e2d7c5b8a1346
       PORTAL_URL: https://clipping.onyxpointmanagement.net
       PENDING_HANDLE: ${{ github.event.inputs.handle }}
+      PENDING_REEL: ${{ github.event.inputs.reel }}
     steps:
       - uses: actions/checkout@v4
       # ubuntu-24.04 runners ship python 3.12 preinstalled; skipping

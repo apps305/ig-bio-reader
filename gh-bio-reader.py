@@ -658,6 +658,59 @@ def report(payload):
     print("report", payload.get("handle"), r.status)
 
 
+def clips_reels(uid):
+    """Last reels of a creator straight from Instagram's clips graphql."""
+    variables = {
+        "data": {"include_feed_video": True, "page_size": 50, "target_user_id": uid},
+        "__relay_internal__pv__PolarisFeedShareMenurelayprovider": False,
+    }
+    req = urllib.request.Request(
+        "https://www.instagram.com/graphql/query/?doc_id=27234427476213202&variables=" + urllib.parse.quote(json.dumps(variables)),
+        headers=dict(HEADERS, **{"User-Agent": UA}),
+    )
+    j = json.loads(urllib.request.urlopen(req, timeout=15).read())
+    conn = (j.get("data") or {}).get("xdt_api__v1__clips__user__connection_v2") or {}
+    out = []
+    for edge in conn.get("edges") or []:
+        media = (edge.get("node") or {}).get("media") or {}
+        if media.get("code"):
+            out.append({"shortcode": media["code"], "views": media.get("play_count"), "likes": media.get("like_count")})
+    return out
+
+
+def reel_views(code):
+    """Views + likes for one reel page: direct identities then live proxies."""
+    urls = [f"https://www.instagram.com/reel/{code}/", f"https://www.instagram.com/p/{code}/"]
+    pat_v = re.compile(r'"(?:video_view_count|play_count|video_play_count)":(\d+)')
+    pat_l = re.compile(r'"like_count":(\d+)')
+    for ua in [UA] + BOT_UAS[:4]:
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers=dict(HEADERS, **{"User-Agent": ua}))
+                body = urllib.request.urlopen(req, timeout=12).read().decode("utf8", "ignore")
+                m = pat_v.search(body)
+                if m:
+                    ml = pat_l.search(body)
+                    return {"views": int(m.group(1)), "likes": int(ml.group(1)) if ml else None, "via": "direct", "ua": ua[:30]}
+            except Exception:
+                continue
+    pool = free_proxies()
+    live = live_proxies(code, pool) if pool else []
+    for px in live[:12]:
+        for url in urls:
+            try:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": px["server"], "https": px["server"]}))
+                req = urllib.request.Request(url, headers=dict(HEADERS, **{"User-Agent": UA}))
+                body = opener.open(req, timeout=10).read().decode("utf8", "ignore")
+                m = pat_v.search(body or "")
+                if m:
+                    ml = pat_l.search(body)
+                    return {"views": int(m.group(1)), "likes": int(ml.group(1)) if ml else None, "via": "proxy"}
+            except Exception:
+                continue
+    return None
+
+
 def main():
     # owner 2026-09-27: never shut down. With the every-minute cron a run is
     # always in the air; polling the queue INSIDE the run picks new handles up
@@ -665,6 +718,14 @@ def main():
     deadline = time.time() + 300
     seen = set()
     want = os.environ.get("PENDING_HANDLE", "").strip()
+    reel = os.environ.get("PENDING_REEL", "").strip()
+    if reel:
+        # single-reel proof run: views + likes for one reel code
+        got = reel_views(reel)
+        row = {"handle": "reel:" + reel, "source": "gh-actions-runner", "poster": "azure-gh", "reel": got}
+        print(json.dumps(row)[:400])
+        report(row)
+        return 0
     first = True
     while True:
         if first:
@@ -760,6 +821,11 @@ def main():
                 continue
             if got:
                 row.update(got)
+                if row.get("owner_id"):
+                    try:
+                        row["reels"] = clips_reels(str(row["owner_id"]))[:5]
+                    except Exception as e:
+                        row["reels_error"] = type(e).__name__
             elif ungated:
                 row["ungated_bio"] = ungated[0][:400]
             row["poster"] = "azure-gh"
