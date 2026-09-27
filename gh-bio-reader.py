@@ -24,7 +24,16 @@ HEADERS = {
 
 def get(url, headers=None):
     req = urllib.request.Request(url, headers=headers or HEADERS)
-    return urllib.request.urlopen(req, timeout=30).read().decode(errors="replace")
+    # owner 2026-09-27: a portal outage (D1 cap window) must NOT crash the run
+    # and spam failure emails; retry 5xx twice, then raise for the caller's guard
+    for attempt in range(3):
+        try:
+            return urllib.request.urlopen(req, timeout=30).read().decode(errors="replace")
+        except urllib.error.HTTPError as e:
+            if 500 <= e.code < 600 and attempt < 2:
+                time.sleep(5)
+                continue
+            raise
 
 
 def parse_profile(html):
@@ -731,115 +740,125 @@ def main():
         return 0
     first = True
     while True:
-        if first:
-            jobs = json.loads(get(PORTAL + "/ingest/biojobs")).get("jobs", [])
-            if want:
-                # a click or connect dispatched this run: that handle first
-                hit = [j for j in jobs if j.get("handle") == want]
-                jobs = (hit or [{"handle": want}]) + [j for j in jobs if j.get("handle") != want]
-                print("dispatched handle first:", want)
-            if not jobs:
-                jobs = [{"handle": "ariakimbaby"}]
-                print("no pending jobs; running egress proof handle")
-            first = False
-        else:
-            # long-poll: the queue answers the instant a new handle appears,
-            # so pickup is ~1 s without 1-s polling (owner 2026-09-27)
-            seen_param = ",".join(sorted(seen))
-            jobs = json.loads(get(PORTAL + "/ingest/biojobs?wait=25&seen=" + seen_param)).get("jobs", [])
-        print("jobs", len(jobs))
-        for job in jobs:
-            seen.add(job.get("handle"))
-            handle = job["handle"]
-            row = {"handle": handle, "source": "gh-actions-runner"}
-            ungated = []
-            pool = free_proxies()
-            got = None
-            # mirrors first: the only stage proven to carry real bios from cloud
-            # egress (greatfon from Azure 2026-09-25 00:36); report at once on hit
-            got = translate_bio(handle, job.get("code") or "")
-            if not got:
-                got = mirror_bio(handle, code=job.get("code") or "", out=ungated)
-            if not got:
-                got = microlink_bio(handle, job.get("code") or "")
-            if not got:
-                try:
-                    got = read_api(handle)
-                    if got:
-                        got["source"] = "gh-api"
-                except Exception as e:
-                    row["error"] = f"api: {type(e).__name__}"
-            if not got:
-                for ua in BOT_UAS + [UA]:
+        try:
+            if first:
+                jobs = json.loads(get(PORTAL + "/ingest/biojobs")).get("jobs", [])
+                if want:
+                    # a click or connect dispatched this run: that handle first
+                    hit = [j for j in jobs if j.get("handle") == want]
+                    jobs = (hit or [{"handle": want}]) + [j for j in jobs if j.get("handle") != want]
+                    print("dispatched handle first:", want)
+                if not jobs:
+                    jobs = [{"handle": "ariakimbaby"}]
+                    print("no pending jobs; running egress proof handle")
+                first = False
+            else:
+                # long-poll: the queue answers the instant a new handle appears,
+                # so pickup is ~1 s without 1-s polling (owner 2026-09-27)
+                seen_param = ",".join(sorted(seen))
+                jobs = json.loads(get(PORTAL + "/ingest/biojobs?wait=25&seen=" + seen_param)).get("jobs", [])
+            print("jobs", len(jobs))
+            for job in jobs:
+                seen.add(job.get("handle"))
+                handle = job["handle"]
+                row = {"handle": handle, "source": "gh-actions-runner"}
+                ungated = []
+                pool = free_proxies()
+                got = None
+                # mirrors first: the only stage proven to carry real bios from cloud
+                # egress (greatfon from Azure 2026-09-25 00:36); report at once on hit
+                got = translate_bio(handle, job.get("code") or "")
+                if not got:
+                    got = mirror_bio(handle, code=job.get("code") or "", out=ungated)
+                if not got:
+                    got = microlink_bio(handle, job.get("code") or "")
+                if not got:
                     try:
-                        html = get(
-                            f"https://www.instagram.com/{handle}/",
-                            headers=dict(HEADERS, **{"User-Agent": ua}),
-                        )
-                        parsed = parse_profile(html)
-                        parsed["len"] = len(html)
-                        parsed["ua"] = ua[:30]
-                        if parsed.get("owner_id") and is_full(parsed):
-                            got = parsed
-                            break
+                        got = read_api(handle)
+                        if got:
+                            got["source"] = "gh-api"
                     except Exception as e:
-                        row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
-            # owner order 2026-09-25: scrape instagram directly; no early exit, the
-            # proxy and render stages ARE the direct path in closed windows
-            live = live_proxies(handle, pool) if not got else []
-            if not got and live:
-                def api_try(px):
-                    if px["kind"] != "http":
-                        return None
-                    try:
-                        g = read_api(handle, px["server"][7:])
-                        g["source"] = "gh-api-proxy"
-                        g["proxy"] = px["server"]
-                        return g
-                    except Exception:
-                        return None
+                        row["error"] = f"api: {type(e).__name__}"
+                if not got:
+                    for ua in BOT_UAS + [UA]:
+                        try:
+                            html = get(
+                                f"https://www.instagram.com/{handle}/",
+                                headers=dict(HEADERS, **{"User-Agent": ua}),
+                            )
+                            parsed = parse_profile(html)
+                            parsed["len"] = len(html)
+                            parsed["ua"] = ua[:30]
+                            if parsed.get("owner_id") and is_full(parsed):
+                                got = parsed
+                                break
+                        except Exception as e:
+                            row["error"] = f"{type(e).__name__}: {str(e)[:100]}"
+                # owner order 2026-09-25: scrape instagram directly; no early exit, the
+                # proxy and render stages ARE the direct path in closed windows
+                live = live_proxies(handle, pool) if not got else []
+                if not got and live:
+                    def api_try(px):
+                        if px["kind"] != "http":
+                            return None
+                        try:
+                            g = read_api(handle, px["server"][7:])
+                            g["source"] = "gh-api-proxy"
+                            g["proxy"] = px["server"]
+                            return g
+                        except Exception:
+                            return None
 
-                from concurrent.futures import ThreadPoolExecutor as TPE
+                    from concurrent.futures import ThreadPoolExecutor as TPE
 
-                with TPE(max_workers=12) as ex:
-                    for g in ex.map(api_try, live[:12]):
-                        if g:
-                            got = g
-                            break
-            if not got:
-                got = read_via_proxies(handle, live)
-            if not got:
-                got = read_jina(handle)
-            if not got and live:
-                # socks exits skip the http health check (urllib cannot speak
-                # socks); playwright can, and dead ones fail fast at connect
-                socksx = [p for p in pool if p["kind"] != "http"][:25]
-                got = render_bio(handle, live + socksx)
-            if not got and not live:
-                # no live exit and every direct stage missed: report and finish
-                # fast instead of burning the run on renders that cannot connect
-                print("no live exits; reporting fail early")
-                row["error"] = "no live exits"
-                report(row)
-                continue
-            if got:
-                row.update(got)
-                if row.get("owner_id"):
-                    try:
-                        row["reels"] = clips_reels(str(row["owner_id"]))[:5]
-                    except Exception as e:
-                        row["reels_error"] = type(e).__name__
-            elif ungated:
-                row["ungated_bio"] = ungated[0][:400]
-            row["poster"] = "azure-gh"
-            print(json.dumps(row)[:400])
-            if row.get("owner_id") and is_full(row):
-                report(row)
-            elif row.get("bio") and is_full(row):
-                report(row)
-        if time.time() > deadline:
-            break
+                    with TPE(max_workers=12) as ex:
+                        for g in ex.map(api_try, live[:12]):
+                            if g:
+                                got = g
+                                break
+                if not got:
+                    got = read_via_proxies(handle, live)
+                if not got:
+                    got = read_jina(handle)
+                if not got and live:
+                    # socks exits skip the http health check (urllib cannot speak
+                    # socks); playwright can, and dead ones fail fast at connect
+                    socksx = [p for p in pool if p["kind"] != "http"][:25]
+                    got = render_bio(handle, live + socksx)
+                if not got and not live:
+                    # no live exit and every direct stage missed: report and finish
+                    # fast instead of burning the run on renders that cannot connect
+                    print("no live exits; reporting fail early")
+                    row["error"] = "no live exits"
+                    report(row)
+                    continue
+                if got:
+                    row.update(got)
+                    if row.get("owner_id"):
+                        try:
+                            row["reels"] = clips_reels(str(row["owner_id"]))[:5]
+                        except Exception as e:
+                            row["reels_error"] = type(e).__name__
+                elif ungated:
+                    row["ungated_bio"] = ungated[0][:400]
+                row["poster"] = "azure-gh"
+                print(json.dumps(row)[:400])
+                if row.get("owner_id") and is_full(row):
+                    report(row)
+                elif row.get("bio") and is_full(row):
+                    report(row)
+            if time.time() > deadline:
+                break
+        except Exception as e:
+            print("loop error:", type(e).__name__, str(e)[:200])
+            if time.time() > deadline:
+                break
+            time.sleep(10)
     return 0
 
 
-sys.exit(main())
+try:
+    sys.exit(main())
+except Exception as e:
+    print("fatal but muted:", type(e).__name__, str(e)[:300])
+    sys.exit(0)
