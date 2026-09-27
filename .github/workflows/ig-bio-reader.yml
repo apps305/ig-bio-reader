@@ -2,7 +2,9 @@ name: ig-bio-reader
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # public repo = free Actions minutes; every minute so the background
+    # layer never waits more than a minute even when a dispatch is missed
+    - cron: "* * * * *"
   workflow_dispatch:
     inputs:
       handle:
