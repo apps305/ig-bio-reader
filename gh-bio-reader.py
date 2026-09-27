@@ -667,8 +667,8 @@ def main():
     want = os.environ.get("PENDING_HANDLE", "").strip()
     first = True
     while True:
-        jobs = json.loads(get(PORTAL + "/ingest/biojobs")).get("jobs", [])
         if first:
+            jobs = json.loads(get(PORTAL + "/ingest/biojobs")).get("jobs", [])
             if want:
                 # a click or connect dispatched this run: that handle first
                 hit = [j for j in jobs if j.get("handle") == want]
@@ -678,7 +678,11 @@ def main():
                 jobs = [{"handle": "ariakimbaby"}]
                 print("no pending jobs; running egress proof handle")
             first = False
-        jobs = [j for j in jobs if j.get("handle") not in seen]
+        else:
+            # long-poll: the queue answers the instant a new handle appears,
+            # so pickup is ~1 s without 1-s polling (owner 2026-09-27)
+            seen_param = ",".join(sorted(seen))
+            jobs = json.loads(get(PORTAL + "/ingest/biojobs?wait=25&seen=" + seen_param)).get("jobs", [])
         print("jobs", len(jobs))
         for job in jobs:
             seen.add(job.get("handle"))
@@ -766,7 +770,6 @@ def main():
                 report(row)
         if time.time() > deadline:
             break
-        time.sleep(10)
     return 0
 
 
