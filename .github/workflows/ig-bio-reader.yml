@@ -21,7 +21,9 @@ on:
 jobs:
   read-bios:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    # warm loop runs up to 5 min plus boot plus proxy floods; 6 min caused
+    # timeout failures (owner 2026-09-28: no failed runs allowed)
+    timeout-minutes: 10
     env:
       BIO_REPORT_KEY: br-4f2a9c71e8d34b6a9f0e2d7c5b8a1346
       PORTAL_URL: https://clipping.onyxpointmanagement.net
