@@ -2,9 +2,9 @@ name: ig-bio-reader
 
 on:
   schedule:
-    # public repo = free Actions minutes; every minute so the background
-    # layer never waits more than a minute even when a dispatch is missed
-    - cron: "* * * * *"
+    # every 2 min: warm pool without burning the portal's D1 read cap
+    # (5 concurrent 5-min runs x 1-min cron x per-second ticks blew it 2026-09-28)
+    - cron: "*/2 * * * *"
   workflow_dispatch:
     inputs:
       handle:

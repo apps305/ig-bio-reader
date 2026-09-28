@@ -753,10 +753,10 @@ def main():
                     print("no pending jobs; running egress proof handle")
                 first = False
             else:
-                # long-poll: the queue answers the instant a new handle appears,
-                # so pickup is ~1 s without 1-s polling (owner 2026-09-27)
-                seen_param = ",".join(sorted(seen))
-                jobs = json.loads(get(PORTAL + "/ingest/biojobs?wait=25&seen=" + seen_param)).get("jobs", [])
+                # plain 20 s poll: the long-poll ticks burned the D1 read cap
+                # with five concurrent runs querying every 1-3 s (cap incident
+                # 2026-09-28); dispatch on click still starts a run instantly
+                jobs = json.loads(get(PORTAL + "/ingest/biojobs")).get("jobs", [])
             print("jobs", len(jobs))
             for job in jobs:
                 seen.add(job.get("handle"))
@@ -854,6 +854,7 @@ def main():
             if time.time() > deadline:
                 break
             time.sleep(10)
+        time.sleep(20)
     return 0
 
 
